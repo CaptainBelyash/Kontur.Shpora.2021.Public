@@ -6,13 +6,16 @@ namespace ReaderWriterLock
 {
     public class RwLock : IRwLock
     {
+        private const int CriticalUsedCount = 10;
+        
         private object writerLocker = new();
+        private object cleanerLocker = new();
         private HashSet<object> riderLockers = new();
+        private HashSet<object> usedLockers = new();
         
         public void ReadLocked(Action action)
         {
             var riderLocker = new object();
-            
             lock (riderLocker)
             {
                 lock (writerLocker)
@@ -20,6 +23,13 @@ namespace ReaderWriterLock
                     riderLockers.Add(riderLocker);
                 }
                 action();
+                lock (cleanerLocker)
+                {
+                    usedLockers.Add(riderLocker);
+                    
+                    if (usedLockers.Count > CriticalUsedCount)
+                        new Thread(() => CleanLockers()).Start();
+                }
             }
         }
 
@@ -31,6 +41,19 @@ namespace ReaderWriterLock
                 action();
                 riderLockers.ForEach(locker => Monitor.Exit(locker));
                 riderLockers.Clear();
+                usedLockers.Clear();
+            }
+        }
+
+        private void CleanLockers()
+        {
+            lock (writerLocker)
+            {
+                lock (cleanerLocker)
+                {
+                    riderLockers.ExceptWith(usedLockers);
+                    usedLockers.Clear();
+                }
             }
         }
     }
